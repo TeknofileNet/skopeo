@@ -69,10 +69,10 @@ binary-local-static:
 	go build -ldflags "-extldflags \"-static\" -X main.gitCommit=${GIT_COMMIT}" -gcflags "$(GOGCFLAGS)" -tags "$(BUILDTAGS)" -o skopeo ./cmd/skopeo
 
 build-alpine-container:
-	docker build -t projectatomic/skopeo -f Dockerfile.ms .
+	docker build -t projectatomic/skopeo .
 
 build-container:
-	docker build ${DOCKER_BUILD_ARGS} -t "$(DOCKER_IMAGE)" .
+	docker build ${DOCKER_BUILD_ARGS} -t "$(DOCKER_IMAGE)" -f Dockerfile.release .
 
 docs/%.1: docs/%.1.md
 	$(GO_MD2MAN) -in $< -out $@.tmp && touch $@.tmp && mv $@.tmp $@

@@ -1,44 +1,62 @@
-FROM fedora
+#
+# ----- Go Builder Alpine Image ------
+#
+FROM golang:1.9-alpine AS builder
 
-RUN dnf -y update && dnf install -y make git golang golang-github-cpuguy83-go-md2man \
-	# storage deps
-	btrfs-progs-devel \
-	device-mapper-devel \
-	# gpgme bindings deps
-	libassuan-devel gpgme-devel \
-	ostree-devel \
-	gnupg
+RUN apk add --no-cache git bash || apk update && apk upgrade
+RUN apk add --no-cache make gcc python2 perl || apk update && apk upgrade
 
-# Install two versions of the registry. The first is an older version that
-# only supports schema1 manifests. The second is a newer version that supports
-# both. This allows integration-cli tests to cover push/pull with both schema1
-# and schema2 manifests.
-ENV REGISTRY_COMMIT_SCHEMA1 ec87e9b6971d831f0eff752ddb54fb64693e51cd
-ENV REGISTRY_COMMIT 47a064d4195a9b56133891bbb13620c3ac83a827
-RUN set -x \
-	&& export GOPATH="$(mktemp -d)" \
-	&& git clone https://github.com/docker/distribution.git "$GOPATH/src/github.com/docker/distribution" \
-	&& (cd "$GOPATH/src/github.com/docker/distribution" && git checkout -q "$REGISTRY_COMMIT") \
-	&& GOPATH="$GOPATH/src/github.com/docker/distribution/Godeps/_workspace:$GOPATH" \
-		go build -o /usr/local/bin/registry-v2 github.com/docker/distribution/cmd/registry \
-	&& (cd "$GOPATH/src/github.com/docker/distribution" && git checkout -q "$REGISTRY_COMMIT_SCHEMA1") \
-	&& GOPATH="$GOPATH/src/github.com/docker/distribution/Godeps/_workspace:$GOPATH" \
-		go build -o /usr/local/bin/registry-v2-schema1 github.com/docker/distribution/cmd/registry \
-	&& rm -rf "$GOPATH"
+RUN apk add --no-cache \
+    musl-dev \
+    btrfs-progs-dev \
+    lvm2-dev \
+    gpgme-dev \
+    glib-dev || apk update && apk upgrade
 
-RUN set -x \
-	&& yum install -y which git tar wget hostname util-linux bsdtar socat ethtool device-mapper iptables tree findutils nmap-ncat e2fsprogs xfsprogs lsof docker iproute \
-	&& export GOPATH=$(mktemp -d) \
-	&& git clone --depth 1 -b v1.5.0-alpha.3 git://github.com/openshift/origin "$GOPATH/src/github.com/openshift/origin" \
-	&& (cd "$GOPATH/src/github.com/openshift/origin" && make clean build && make all WHAT=cmd/dockerregistry) \
-	&& cp -a "$GOPATH/src/github.com/openshift/origin/_output/local/bin/linux"/*/* /usr/local/bin \
-	&& cp "$GOPATH/src/github.com/openshift/origin/images/dockerregistry/config.yml" /atomic-registry-config.yml \
-	&& mkdir /registry
+RUN apk add --no-cache -X http://nl.alpinelinux.org/alpine/edge/testing ostree-dev
 
-ENV GOPATH /usr/share/gocode:/go
-ENV PATH $GOPATH/bin:/usr/share/gocode/bin:$PATH
-RUN go get github.com/golang/lint/golint
+# set working directory
+RUN mkdir -p /go/src/github.com/projectatomic/skopeo
 WORKDIR /go/src/github.com/projectatomic/skopeo
-COPY . /go/src/github.com/projectatomic/skopeo
 
-#ENTRYPOINT ["hack/dind"]
+# copy sources (including .git repo)
+COPY . .
+
+# run test and calculate coverage: skip for RELEASE
+RUN make binary-local
+
+#
+# ------ Pumba runtime image ------
+#
+FROM alpine:3.6
+
+RUN apk add --no-cache \
+    device-mapper-libs \
+    gpgme \
+    glib \
+    expat \
+    libacl \
+    libarchive \
+    libassuan \
+    libattr \
+    libblkid \
+    libbz2 \
+    libffi \
+    libgpg-error \
+    libintl \
+    libmount \
+    libressl2.5-libcrypto \
+    libsoup \
+    libuuid \
+    libxml2 \
+    lz4-libs \
+    pcre \
+    sqlite-libs \
+    xz-libs \
+    zlib || apk update && apk upgrade
+
+RUN apk add --no-cache -X http://nl.alpinelinux.org/alpine/edge/testing ostree
+
+COPY --from=builder /go/src/github.com/projectatomic/skopeo/skopeo /usr/local/bin/skopeo
+
+CMD ["/usr/local/bin/skopeo", "--help"]
